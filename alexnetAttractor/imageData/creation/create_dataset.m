@@ -1,7 +1,6 @@
 tic
 %% create 13k partially occluded images from original 325.
-filepath = 'data/data_occlusion_klab325v2.mat';
-data = load(filepath);
+data = load('data_occlusion_klab325v2.mat');
 
 % sort by object id
 [data, sort_indx] = sortrows(data.data, {'pres'});
