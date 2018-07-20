@@ -1,8 +1,16 @@
 %% load data
-fc7 = load('featureData/fc7FullAndOccPol_325.mat');
+fc7 = load('featureData/vgg15FullAndOccPol_325.mat');
  
 fc7_full_polarized = fc7.fc7_full_polarized; % polarized fc7 reps of 325 full images
 fc7_occ_polarized = fc7.fc7_occ_polarized;   % polarized fc7 reps of 13k occluded images
+
+%% format...
+m = cell(325,1);
+for i = 1:325
+    m{i} = reshape(fc7_occ_polarized(i,:,:),[2,4096]);
+end
+
+fc7_occ_polarized = m;
 
 %% create hopfield net
 T = double(fc7_full_polarized');
@@ -11,7 +19,7 @@ net = newhop(T);
 %% feed fc7_occ_polarized into hopfield for timesteps and record result in cell 325x1 cell array, each cell has #occluded_imgs x timesteps x features
 % num_objs = length(fc7_occ_polarized);
 num_objs = 325;
-timesteps = 60;
+timesteps = 256;
 occ_trajs = cell(num_objs,1);
 for i = 1:num_objs
     occ_i = fc7_occ_polarized{i};
@@ -20,7 +28,7 @@ for i = 1:num_objs
     features = occ_size(2);
 
     occ_i_trajs = zeros(num_occ,timesteps,features);
-    for j = 1:2:num_occ
+    for j = 1:12:num_occ
         t0 = double(occ_i(j,:)');
         y = net({1 timesteps}, {}, {t0});
         occ_i_trajs(j,:,:) = cell2mat(y)';
@@ -29,7 +37,7 @@ for i = 1:num_objs
     disp(i)
 end
 
-save('featureData/fc7OccTrajs','occ_trajs','-v7.3')
+save('vgg16OccTrajs_trunc','occ_trajs','-v7.3')
 
 
 % individual run, most things converging to object 41?
