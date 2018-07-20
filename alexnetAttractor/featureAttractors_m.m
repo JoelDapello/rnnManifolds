@@ -1,8 +1,11 @@
+%% add path
+addpath('/home/dapello/rnnManifolds/featureData')
+
 %% load data
-fc7_full = load('featureData/caffenet-relu7_og325.mat');
+fc7_full = load('caffenet-relu7_og325.mat');
 fc7_full = fc7_full.features;
 
-fc7_occ = load('featureData/caffenet-relu7_13k.mat');
+fc7_occ = load('caffenet-relu7_13k.mat');
 fc7_occ = fc7_occ.features;
 
 fc7_full(fc7_full>0) = 1;
@@ -15,6 +18,7 @@ fc7_occ(fc7_occ==0) = -1;
 % fc7_occ_polarized = fc7.fc7_occ_polarized;   % polarized fc7 reps of 13k occluded images
 
 %% create hopfield net
+disp('train hopfield')
 T = double(fc7_full');
 net = newhop(T);
 
@@ -22,16 +26,17 @@ net = newhop(T);
 num_occ = length(fc7_occ);
 % num_occ = 10;
 timesteps = 256;
-occ_trajs = zeros(num_occ,timesteps,4096);
+occ_trajs = zeros(num_occ,6,4096);
 
 for i = 1:num_occ
     t0 = double(fc7_occ(i,:)');
     y = net({1 timesteps}, {}, {t0});
-    occ_trajs(i,:,:) = cell2mat(y)';
+    y = cell2mat(y)';
+    occ_trajs(i,:,:) = y(1:50:end,:);
     disp(i)
 end
 
-save('vgg16OccTrajs_trunc','occ_trajs','-v7.3')
+save('/om/user/dapello/caffenetOccTrajs','occ_trajs','-v7.3')
 
 
 % individual run, most things converging to object 41?
