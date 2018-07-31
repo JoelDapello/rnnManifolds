@@ -1,10 +1,14 @@
 import os, time, glob, argparse
 
 import numpy as np
+from scipy.io import loadmat, savemat
 import tensorflow as tf
 
 from tnn import main
 from tnn.reciprocalgaternn import tnn_ReciprocalGateCell
+
+import warnings
+warnings.filterwarnings("ignore")
 
 host = os.uname()[1]
 if host.startswith('braintree'):
@@ -20,7 +24,6 @@ parser.add_argument('--ntimes', default=5, type=int)
 parser.add_argument('--nsteps', default=int(1e5), type=lambda x: int(float(x)))
 FLAGS, _ = parser.parse_known_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(FLAGS.gpus)
-print(os.environ)
 
 batch_size = FLAGS.batch_size
 NUM_TIMESTEPS = 4 # number of timesteps we are predicting on
@@ -28,14 +31,14 @@ NETWORK_DEPTH = 5 # number of total layers in our network
 
 # we always unroll num_timesteps after the first output of the model
 TOTAL_TIMESTEPS = NETWORK_DEPTH + NUM_TIMESTEPS 
-BASE_NAME = '../json/5L_imnet128_recip345sig_noBN'
+BASE_NAME = './json/5L_imnet128_recip345sig_noBN'
 
 def model_func(input_images, ntimes=TOTAL_TIMESTEPS, 
     batch_size=batch_size, edges_arr=[], 
     base_name=BASE_NAME, 
     tau=0.0, train=False, trainable_flag=False):
 
-    with tf.variable_scope("my_model"):
+    with tf.variable_scope("my_model", reuse=tf.AUTO_REUSE):
         # I think images should show up already formatted
         # input_images = tf.reshape(input_images, [-1, 28, 28, 1])
         base_name += '.json'
@@ -70,104 +73,6 @@ def model_func(input_images, ntimes=TOTAL_TIMESTEPS,
 
         return outputs
 
-class ConvRNNCell(tf.nn.rnn_cell.RNNCell):
-    """Wrapper around our GRU cell implementation that allows us to play
-    nicely with TensorFlow.
-    """
-    def __init__(self,
-                 filters,
-                 kernel_size=3,
-                 strides=1,
-                 ):
-        self.filters = filters
-        self.kernel_size = kernel_size
-        self.strides = 1
-
-    @property
-    def state_size(self):
-        return self._state_size
-
-    @property
-    def output_size(self):
-        return self._output_size
-
-    def __call__(self, inputs, state):
-        conv_kwargs = dict(filters=self.filters,
-                           kernel_size=self.kernel_size,
-                           strides=self.strides,
-                           padding='same',
-                           activation=None,
-                           kernel_initializer=tf.contrib.layers.xavier_initializer(),
-                           #kernel_regularizer=tf.contrib.layers.l2_regularizer(5e-4),
-                           #bias_regularizer=tf.contrib.layers.l2_regularizer(5e-4),
-                           reuse=tf.AUTO_REUSE)
-        i = tf.layers.conv2d(inputs, name='input', **conv_kwargs)
-        s = tf.layers.conv2d(state, name='state', **conv_kwargs)
-        state = tf.contrib.layers.layer_norm(i + s,
-                                             activation_fn=tf.nn.elu,
-                                             reuse=tf.AUTO_REUSE,
-                                             scope='layer_norm'
-                                             )
-        x = tf.layers.max_pooling2d(state, 3, 2, padding='same')
-        output = tf.identity(x, name='output')
-        return output, state
-
-def basenet(inputs, train=False, conv_only=False):
-    conv_kwargs = dict(padding='same',
-                       activation=tf.nn.relu,
-                       kernel_initializer=tf.contrib.layers.xavier_initializer(),
-                       #kernel_regularizer=tf.contrib.layers.l2_regularizer(5e-4),
-                       #bias_regularizer=tf.contrib.layers.l2_regularizer(5e-4),
-                       reuse=tf.AUTO_REUSE)
-    pool_kwargs = dict(padding='same')
-
-    with tf.variable_scope('V1', reuse=tf.AUTO_REUSE):
-        x = tf.layers.conv2d(inputs, 64, 7, strides=2, **conv_kwargs)
-        x = tf.layers.max_pooling2d(x, 3, 2, **pool_kwargs)
-        x = tf.identity(x, name='output')
-
-    with tf.variable_scope('V2', reuse=tf.AUTO_REUSE):
-        #x = tf.layers.conv2d(x, 128, 3, **conv_kwargs)
-        x = tf.layers.conv2d(x, 256, 3, **conv_kwargs)
-        x = tf.layers.max_pooling2d(x, 3, 2, **pool_kwargs)
-        x = tf.identity(x, name='output')
-
-    cells = []
-    output = x
-    print('output shape', output.shape.as_list())
-    for i, layer in zip(range(3), ['V4', 'pIT', 'aIT']):
-        with tf.variable_scope('rnn/multi_rnn_cell/cell_'.format(i)):
-            #nfilters = 2 ** (8 + i)
-            nfilters = 2 ** 8
-            print("nfilters:", nfilters)
-            state = tf.placeholder(shape=[None,
-                                          output.shape.as_list()[1],
-                                          output.shape.as_list()[2],
-                                          nfilters,
-                                          ],
-                                   dtype=tf.float32)
-            cell = ConvRNNCell(nfilters, 3)
-            output, state = cell(output, state)
-            cell._output_size = output.shape[1:]
-            cell._state_size = state.shape[1:]
-            cells.append(cell)
-
-    cells = tf.nn.rnn_cell.MultiRNNCell(cells)
-    outputs, states = tf.nn.dynamic_rnn(cells, tf.stack([x] * FLAGS.ntimes, 0),
-                                        dtype=tf.float32, time_major=True)
-    x = tf.identity(outputs[-1], name='aIT/output')
-
-    if not conv_only:
-        with tf.variable_scope('ds'):
-            x = tf.layers.flatten(x)
-            x = tf.layers.dense(x, 1000,
-                                kernel_initializer=tf.contrib.layers.xavier_initializer(),
-                                #kernel_regularizer=tf.contrib.layers.l2_regularizer(5e-4),
-                                #bias_regularizer=tf.contrib.layers.l2_regularizer(5e-4),
-                                reuse=tf.AUTO_REUSE)
-            x = tf.identity(x, name='output')
-
-    return x
 
 def basenet2(inputs, train=False, conv_only=False):
     x = model_func(inputs, ntimes=TOTAL_TIMESTEPS,
@@ -175,6 +80,7 @@ def basenet2(inputs, train=False, conv_only=False):
         base_name=BASE_NAME, tau=0.0, trainable_flag=False)
 
     return x[3]
+
 
 def parse_image(im):
     im = tf.decode_raw(im, np.uint8)
@@ -184,7 +90,6 @@ def parse_image(im):
 
 
 class Train(object):
-
     def __init__(self, arch, kind):
         self.kind = kind
         self.train = kind == 'train'
@@ -194,7 +99,6 @@ class Train(object):
         with tf.name_scope(self.kind):
             inputs = self.data()
             logits = arch(inputs['images'], train=self.train)
-            print(logits)
             targets['softmax_loss'] = self.softmax_loss(inputs['labels'], logits)
             targets['loss'] = targets['softmax_loss']
             #targets['loss'] = targets['softmax_loss'] + self.reg_loss()
@@ -310,22 +214,19 @@ class Train(object):
 
 
 def train(restore=True,
-          save_train_steps=50,
-          save_val_steps=50,
-          save_model_steps=50,
+          save_train_steps=500,
+          save_val_steps=5000,
+          save_model_steps=1000,
           ):
 
     tf.Variable(0, trainable=False, name='global_step')
-    #train = Train(model_func, 'train')
-    #val = [Train(model_func, 'val')]
     train = Train(basenet2, 'train')
-    #val = [Train(basenet2, 'val')]
-
+    val = [Train(basenet2, 'val')]
     saver = tf.train.Saver()
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        #if restore:
-        #    saver.restore(sess, save_path='model.ckpt-100000')
+        if restore:
+            saver.restore(sess, save_path='./imnet.ckpt/model.ckpt-test')
         sess.run(train.iterator.initializer)
 
         step = sess.run(tf.train.get_global_step())
@@ -333,9 +234,9 @@ def train(restore=True,
             step = sess.run(tf.train.get_global_step())
             results = {'step': step}
 
-            #if step % save_val_steps == 0:
-            #    for v in val:
-            #        results[v.name] = v(sess)
+            if step % save_val_steps == 0:
+                for v in val:
+                    results[v.name] = v(sess)
 
             if step % save_model_steps == 0:
                 saver.save(sess=sess,
@@ -347,31 +248,61 @@ def train(restore=True,
             else:
                 sess.run(train.optimizer)
 
-            #if len(results) > 1:  # not only step is available
-            print(results)
+            if len(results) > 1:  # not only step is available
+                print(results)
 
 
-def get_features(ims, layer='aIT'):
-    placeholder = tf.placeholder(shape=(None, ims[0].shape[0], ims[0].shape[1], 3), dtype=tf.float32)
-    basenet(placeholder, conv_only=True)
-    target = tf.get_default_graph().get_tensor_by_name('{}/output:0'.format(layer))
+def get_features(ims):
+    n_batches = (len(ims) - 1) // FLAGS.test_batch_size + 1
+    stack_depth = ims.shape[0]/n_batches
+    placeholder = tf.placeholder(shape=(stack_depth, ims[0].shape[0], ims[0].shape[1], 3), dtype=tf.float32)
+    # placeholder = tf.placeholder(shape=(None, ims[0].shape[0], ims[0].shape[1], 3), dtype=tf.float32)
+    # ims = tf.tensor
+    # placeholder = tf.placeholder(shape=tf.shape(ims), dtype=tf.float32)
+
+    print('placeholder', placeholder)
+    basenet2(placeholder, conv_only=True)
+    
+    ops = tf.get_default_graph().get_operations()
+    layers = [op.name for op in ops if 'output' in op.name]
+    print('target layers = ', layers)
+    # target = tf.get_default_graph().get_tensor_by_name('{}/output:0'.format(layer))
+    targets = [tf.get_default_graph().get_tensor_by_name(layer+':0') for layer in layers]
 
     saver = tf.train.Saver()
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        saver.restore(sess, save_path='model.ckpt-100000')
+        saver.restore(sess, save_path='./imnet.ckpt/model.ckpt-test')
 
         n_batches = (len(ims) - 1) // FLAGS.test_batch_size + 1
         out = []
         for i in range(n_batches):
             batch = ims[FLAGS.test_batch_size * i: FLAGS.test_batch_size * (i + 1)]
-            batch_out = sess.run(target, feed_dict={placeholder: batch})
+            batch_out = sess.run(targets, feed_dict={placeholder: batch})
+            # batch_out = sess.run(target, feed_dict={placeholder: batch})
             out.append(batch_out)
-        out = np.row_stack(out)
+        #out = np.row_stack(out)
     return out
 
 
+def load_HvM_images():
+    HvM_file = loadmat('../imageData/HvM_128px.mat')
+    imgs = HvM_file['imgs']
+    return imgs
+
+
+def save_HvM_features():
+    # ims = np.random.random([128,128,128,3])
+    # ims = load_HvM_images()[:256]
+    ims = load_HvM_images()
+    out = get_features(ims)
+    # print(out)
+    savemat('../featureData/recipgated_HvM_all_outputs.mat', {
+        'features':out
+    })
+    print("saved HvM features!")
+
+
 if __name__ == '__main__':
-    #ims = np.random.random([12,224,224,3])
-    #get_features(ims)
+    # save_HvM_features()
     train()

@@ -388,10 +388,16 @@ def train(restore=True,
                 print(results)
 
 
-def get_features(ims, layer='aIT'):
+def get_features(ims):
     placeholder = tf.placeholder(shape=(None, ims[0].shape[0], ims[0].shape[1], 3), dtype=tf.float32)
     basenet(placeholder, conv_only=True)
-    target = tf.get_default_graph().get_tensor_by_name('{}/output:0'.format(layer))
+    op = tf.get_default_graph().get_operations()
+
+    layers = [m.name for m in op if 'output' in m.name]
+    layers = [layers[0], layers[1],layers[-1]]
+    print('target layers = ', layers)
+    # target = tf.get_default_graph().get_tensor_by_name('{}/output:0'.format(layer))
+    targets = [tf.get_default_graph().get_tensor_by_name(layer+':0') for layer in layers]
 
     saver = tf.train.Saver()
     with tf.Session() as sess:
@@ -402,13 +408,22 @@ def get_features(ims, layer='aIT'):
         out = []
         for i in range(n_batches):
             batch = ims[FLAGS.test_batch_size * i: FLAGS.test_batch_size * (i + 1)]
-            batch_out = sess.run(target, feed_dict={placeholder: batch})
+            batch_out = sess.run(targets, feed_dict={placeholder: batch})
+            # batch_out = sess.run(target, feed_dict={placeholder: batch})
             out.append(batch_out)
-        out = np.row_stack(out)
+        # out = np.row_stack(out)
     return out
 
 
+def load_HvM_images():
+    from scipy.io import loadmat, savemat
+    HvM_file = loadmat('../imageData/HvM_128px.mat')
+    imgs = HvM_file['imgs']
+    return imgs
+
 if __name__ == '__main__':
-    # ims = np.random.random([12,224,224,3])
-    # get_features(ims)
-    train()
+    ims = load_HvM_images()[:4]
+    out = get_features(ims)
+    print(out)
+    print(len(out[0]))
+    # train()
