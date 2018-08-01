@@ -17,6 +17,7 @@ elif host.startswith('node'):
     DATA_PATH = '/om/user/qbilius/imagenet2012_tf_256px'
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--train', default=0, type=int)
 parser.add_argument('--batch_size', default=128, type=int)
 parser.add_argument('--test_batch_size', default=128, type=int)
 parser.add_argument('--gpus', default=['1'], nargs='*')
@@ -293,16 +294,30 @@ def load_HvM_images():
 
 def save_HvM_features():
     # ims = np.random.random([128,128,128,3])
-    # ims = load_HvM_images()[:256]
-    ims = load_HvM_images()
+    ims = load_HvM_images()[:256]
+    # ims = load_HvM_images()
     out = get_features(ims)
     # print(out)
-    savemat('../featureData/recipgated_HvM_all_outputs.mat', {
-        'features':out
-    })
+    #import code
+    #code.interact(local=locals())
+    import h5py
+
+    out_idx = range(len(out[0]))
+    print(out_idx)
+    for i in out_idx: 
+        features = np.row_stack([j[i] for j in out])
+        print('saving features:{}, shaped:{}'.format(i,features.shape))
+        savemat('../featureData/recipgated_HvM_features_{}.mat'.format(i), {
+            'features':features
+        })
+
     print("saved HvM features!")
 
 
 if __name__ == '__main__':
-    # save_HvM_features()
-    train()
+    if FLAGS.train:
+        print('>>> TRAIN MODEL')
+        train()
+    else:
+        print('>>> GET MODEL FEATURES')
+        save_HvM_features()
