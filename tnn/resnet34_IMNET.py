@@ -18,21 +18,21 @@ elif host.startswith('node'):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--train', default=0, type=int)
-parser.add_argument('--batch_size', default=64, type=int)
-parser.add_argument('--test_batch_size', default=64, type=int)
+parser.add_argument('--batch_size', default=16, type=int)
+parser.add_argument('--test_batch_size', default=16, type=int)
 parser.add_argument('--gpus', default=['1'], nargs='*')
 parser.add_argument('--ntimes', default=5, type=int)
-parser.add_argument('--nsteps', default=int(2e5), type=lambda x: int(float(x)))
+parser.add_argument('--nsteps', default=int(4e5), type=lambda x: int(float(x)))
 FLAGS, _ = parser.parse_known_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(FLAGS.gpus)
 
 batch_size = FLAGS.batch_size
-NUM_TIMESTEPS = 12 # number of timesteps we are predicting on
-NETWORK_DEPTH = 5 # number of total layers in our network
+NUM_TIMESTEPS = 1  # number of timesteps we are predicting on
+NETWORK_DEPTH = 16 # number of total layers in our network
 
 # we always unroll num_timesteps after the first output of the model
 TOTAL_TIMESTEPS = NETWORK_DEPTH + NUM_TIMESTEPS 
-BASE_NAME = './json/5L_imnet128_recip345sig_noBN'
+BASE_NAME = './json/resnet34_noBN'
 
 def model_func(input_images, ntimes=TOTAL_TIMESTEPS, 
     batch_size=batch_size, edges_arr=[], 
@@ -62,15 +62,15 @@ def model_func(input_images, ntimes=TOTAL_TIMESTEPS,
         G.add_edges_from(edges_arr)
 
         # initialize network to infer the shapes of all the parameters
-        main.init_nodes(G, input_nodes=['L1'], batch_size=batch_size)
+        main.init_nodes(G, input_nodes=['conv1'], batch_size=batch_size)
         # unroll the network through time
-        main.unroll(G, input_seq={'L1': input_images}, ntimes=ntimes)
+        main.unroll(G, input_seq={'conv1': input_images}, ntimes=ntimes)
 
         outputs = {}
         # start from the final output of the model and 4 timesteps beyond that
         for t in range(ntimes-NUM_TIMESTEPS, ntimes):
             idx = t - (ntimes - NUM_TIMESTEPS) # keys start at timepoint 0
-            outputs[idx] = G.node['readout']['outputs'][t]
+            outputs[idx] = G.node['imnetds']['outputs'][t]
 
         return outputs
 
@@ -80,7 +80,7 @@ def basenet2(inputs, train=False, conv_only=False):
         batch_size=batch_size, edges_arr=[],
         base_name=BASE_NAME, tau=0.0, trainable_flag=False)
 
-    return x[NUM_TIMESTEPS-1]
+    return x[0]
 
 
 def parse_image(im):
@@ -227,13 +227,12 @@ def train(restore=False,
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         if restore:
-            saver.restore(sess, save_path='./imnet.ckpt/model.ckpt-test')
+            saver.restore(sess, save_path='./resnet-imnet.ckpt/model.ckpt-test')
         sess.run(train.iterator.initializer)
 
         step = sess.run(tf.train.get_global_step())
         while step <= FLAGS.nsteps:
             step = sess.run(tf.train.get_global_step())
-            print(step)
             results = {'step': step}
 
             if step % save_val_steps == save_val_steps-1:
@@ -242,7 +241,7 @@ def train(restore=False,
 
             if step % save_model_steps == 0:
                 saver.save(sess=sess,
-                           save_path='./imnet.ckpt/model.ckpt',
+                           save_path='./resnet-imnet.ckpt/model.ckpt',
                            global_step=tf.train.get_global_step())
 
             if step % save_train_steps == 0:
@@ -274,7 +273,7 @@ def get_features(ims):
     saver = tf.train.Saver()
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        saver.restore(sess, save_path='./imnet.ckpt/model.ckpt-test')
+        saver.restore(sess, save_path='./resnet-imnet.ckpt/model.ckpt-test')
 
         n_batches = (len(ims) - 1) // FLAGS.test_batch_size + 1
         out = []
