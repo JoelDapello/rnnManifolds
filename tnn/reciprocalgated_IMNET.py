@@ -22,7 +22,7 @@ parser.add_argument('--batch_size', default=64, type=int)
 parser.add_argument('--test_batch_size', default=64, type=int)
 parser.add_argument('--gpus', default=['1'], nargs='*')
 parser.add_argument('--ntimes', default=5, type=int)
-parser.add_argument('--nsteps', default=int(2e5), type=lambda x: int(float(x)))
+parser.add_argument('--nsteps', default=int(4e5), type=lambda x: int(float(x)))
 FLAGS, _ = parser.parse_known_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(FLAGS.gpus)
 
@@ -214,7 +214,7 @@ class Train(object):
         return rec
 
 
-def train(restore=False,
+def train(restore=True,
           save_train_steps=500,
           save_val_steps=5000,
           save_model_steps=1000,
@@ -227,13 +227,12 @@ def train(restore=False,
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         if restore:
-            saver.restore(sess, save_path='./imnet.ckpt/model.ckpt-test')
+            saver.restore(sess, save_path='./recipgated_imnet_saved/model.ckpt-196000')
         sess.run(train.iterator.initializer)
 
         step = sess.run(tf.train.get_global_step())
         while step <= FLAGS.nsteps:
             step = sess.run(tf.train.get_global_step())
-            print(step)
             results = {'step': step}
 
             if step % save_val_steps == save_val_steps-1:
@@ -274,7 +273,7 @@ def get_features(ims):
     saver = tf.train.Saver()
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        saver.restore(sess, save_path='./imnet.ckpt/model.ckpt-test')
+        saver.restore(sess, save_path='./recipgated_imnet_saved/model.ckpt-285000')
 
         n_batches = (len(ims) - 1) // FLAGS.test_batch_size + 1
         out = []
@@ -295,11 +294,8 @@ def load_HvM_images():
 
 
 def save_HvM_features():
-    # ims = np.random.random([128,128,128,3])
-    # ims = load_HvM_images()[:256]
     ims = load_HvM_images()
     layers, out = get_features(ims)
-    # print(out)
     #import code
     #code.interact(local=locals())
     import h5py
@@ -309,9 +305,14 @@ def save_HvM_features():
     for i in out_idx: 
         features = np.row_stack([j[i] for j in out])
         print('saving features for layer:{}, shaped:{}'.format(layers[i],features.shape))
-        savemat('../featureData/recipgated_HvM_{}_features.mat'.format(layers[i].replace('/','-')), {
-            'features':features
-        })
+        path = '../featureData/recipgatedt17_HvM_{}_features.mat'.format(layers[i].replace('/','-'))
+        hf = h5py.File(path, 'w')
+        hf.create_dataset('features', data=features)
+        hf.close()
+        del features
+        #savemat('../featureData/recipgatedt17_HvM_{}_features.mat'.format(layers[i].replace('/','-')), {
+        #    'features':features
+        #})
 
     print("saved HvM features!")
 
