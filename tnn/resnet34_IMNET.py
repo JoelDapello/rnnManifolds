@@ -18,8 +18,8 @@ elif host.startswith('node'):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--train', default=0, type=int)
-parser.add_argument('--batch_size', default=16, type=int)
-parser.add_argument('--test_batch_size', default=16, type=int)
+parser.add_argument('--batch_size', default=128, type=int)
+parser.add_argument('--test_batch_size', default=128, type=int)
 parser.add_argument('--gpus', default=['1'], nargs='*')
 parser.add_argument('--ntimes', default=5, type=int)
 parser.add_argument('--nsteps', default=int(4e5), type=lambda x: int(float(x)))
@@ -33,6 +33,53 @@ NETWORK_DEPTH = 16 # number of total layers in our network
 # we always unroll num_timesteps after the first output of the model
 TOTAL_TIMESTEPS = NETWORK_DEPTH + NUM_TIMESTEPS 
 BASE_NAME = './json/resnet34_noBN'
+
+def resnet_func(inputs, 
+                 train=True, 
+                 base_name='resnet34_noBN',
+                 out_name='imnetds',
+                 ntimes=1,
+                 im_key='images_imagenet',
+                 seed=0, cfg_final=None):
+
+    print('Train set to ' + str(train))
+    params = {}
+
+    # images = tf.identity(tf.cast(inputs[im_key], dtype=tf.float32), name='split')
+    images = inputs
+    batch_size = images.get_shape().as_list()[0]
+    print('IM SHAPE', images.shape)
+
+    #if 'json' not in base_name:
+    base_name += '.json'
+
+    print('Using base name', base_name)
+
+    with tf.variable_scope('tnn_resnet', reuse=tf.AUTO_REUSE):
+        G = main.graph_from_json(base_name)
+
+        # adding anything else to the base json
+        for node, attr in G.nodes(data=True):
+            if 'conv' in node:
+                print('Applying batch norm to ', node)
+                # set train flag of batch norm for conv layers
+                attr['kwargs']['pre_memory'][0][1]['batch_norm'] = False
+                attr['kwargs']['pre_memory'][0][1]['is_training'] = train
+                if node != 'conv1':
+                    attr['kwargs']['post_memory'][0][1]['batch_norm'] = False
+                    attr['kwargs']['post_memory'][0][1]['is_training'] = train
+
+        # building tensorflow graph
+        # infer shapes
+        main.init_nodes(G, input_nodes=['conv1'], batch_size=batch_size, channel_op='concat')
+        # build full graph
+        main.unroll_tf(G, input_seq={'conv1': images}, ntimes=ntimes)
+
+        # get model outputs
+        outputs = {}
+        outputs['logits'] = G.node['imnetds']['outputs'][-1]
+        return outputs, params
+
 
 def model_func(input_images, ntimes=TOTAL_TIMESTEPS, 
     batch_size=batch_size, edges_arr=[], 
@@ -74,6 +121,12 @@ def model_func(input_images, ntimes=TOTAL_TIMESTEPS,
 
         return outputs
 
+
+def basenet3(inputs, train=False, conv_only=False):
+    x, params = resnet_func(inputs, train=train,
+        base_name=BASE_NAME)
+    print(x)
+    return x['logits']
 
 def basenet2(inputs, train=False, conv_only=False):
     x = model_func(inputs, ntimes=TOTAL_TIMESTEPS,
@@ -221,8 +274,8 @@ def train(restore=False,
           ):
 
     tf.Variable(0, trainable=False, name='global_step')
-    train = Train(basenet2, 'train')
-    val = [Train(basenet2, 'val')]
+    train = Train(basenet3, 'train')
+    val = [Train(basenet3, 'val')]
     saver = tf.train.Saver()
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
@@ -262,9 +315,10 @@ def get_features(ims):
     # placeholder = tf.placeholder(shape=tf.shape(ims), dtype=tf.float32)
 
     print('placeholder', placeholder)
-    basenet2(placeholder, conv_only=True)
+    basenet3(placeholder, conv_only=True)
     
     ops = tf.get_default_graph().get_operations()
+    # print('ops: ',ops)
     layers = [op.name for op in ops if 'output' in op.name]
     print('target layers = ', layers)
     # target = tf.get_default_graph().get_tensor_by_name('{}/output:0'.format(layer))
@@ -273,7 +327,7 @@ def get_features(ims):
     saver = tf.train.Saver()
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        saver.restore(sess, save_path='./resnet-imnet.ckpt/model.ckpt-test')
+        saver.restore(sess, save_path='./resnet34_imnet_saved/model.ckpt-320000')
 
         n_batches = (len(ims) - 1) // FLAGS.test_batch_size + 1
         out = []
@@ -308,9 +362,14 @@ def save_HvM_features():
     for i in out_idx: 
         features = np.row_stack([j[i] for j in out])
         print('saving features for layer:{}, shaped:{}'.format(layers[i],features.shape))
-        savemat('../featureData/recipgated_HvM_{}_features.mat'.format(layers[i].replace('/','-')), {
-            'features':features
-        })
+        path = '../featureData/resnet34_HvM_{}_features.h5'.format(layers[i].replace('/','-'))
+        hf = h5py.File(path, 'w')
+        hf.create_dataset('features', data=features)
+        hf.close()
+        #savemat('../featureData/resnet34_HvM_{}_features.mat'.format(layers[i].replace('/','-')), {
+        #    'features':features
+        #})
+        del features
 
     print("saved HvM features!")
 
